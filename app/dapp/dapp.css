@@ -78,6 +78,90 @@ header {
   z-index: 2;
 }
 
+.wallet-bar {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wallet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wallet__hint {
+  font-size: 12px;
+  opacity: 0.85;
+  background: var(--color-background);
+  color: var(--color-text);
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.wallet__btn {
+  border: 0;
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 700;
+  background: #111827;
+  color: #fff;
+}
+
+.wallet__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.wallet__btn--ghost {
+  background: var(--color-background);
+  color: var(--color-text);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.wallet__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-background);
+  color: var(--color-text);
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.wallet__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+.wallet__addr {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.wallet__net {
+  font-size: 12px;
+  opacity: 0.8;
+  padding-left: 8px;
+  border-left: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.wallet__error {
+  width: 100%;
+  text-align: right;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
 .main-nav {
   flex-grow: 1;
   text-align: right;
@@ -385,11 +469,46 @@ footer {
   opacity: 0.95;
 }
 
+.voter-modal__error {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
 .voter-modal__actions {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  right: 16px;
+  top: 74px;
+  z-index: 1000;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: var(--color-background);
+  color: var(--color-text);
+}
+
+.toast--error {
+  border-color: rgba(185, 28, 28, 0.25);
+}
+
+.toast--success {
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.toast--info {
+  border-color: rgba(2, 132, 199, 0.25);
 }
 
 .voter-modal__btn {

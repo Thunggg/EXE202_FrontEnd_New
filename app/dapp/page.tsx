@@ -3,11 +3,42 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MetaMaskConnect from "@/components/metamask-connect";
 
+function addressToNullifierDecimal(address: string) {
+  const a = address.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(a)) return null;
+  try {
+    return BigInt(a).toString(10);
+  } catch {
+    return null;
+  }
+}
+
+async function postJsonWithTimeout<T>(url: string, body: unknown, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    window.clearTimeout(t);
+  }
+}
+
 export default function DappPage() {
   const expRef = useRef<{ dispose: () => void; vote: (id: string) => Promise<void> } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [votedIds, setVotedIds] = useState<Set<string>>(() => new Set());
   const [isVoting, setIsVoting] = useState(false);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [walletHasVoted, setWalletHasVoted] = useState(false);
+  const [voteError, setVoteError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; kind: "error" | "info" | "success" } | null>(null);
+
+  const MAX_CANDIDATES = 3; // must match circom: var MAX_CANDIDATES = 3;
 
   const candidates = useMemo(
     () => [
@@ -69,6 +100,19 @@ export default function DappPage() {
 
   const selectedVoter = candidates.find((v) => v.id === selectedId) ?? null;
   const hasVoted = selectedId ? votedIds.has(selectedId) : false;
+  const alreadyVoted = hasVoted || walletHasVoted;
+  const selectedCandidateIndex = selectedId ? candidates.findIndex((c) => c.id === selectedId) : -1;
+  const isSupportedCandidate = selectedCandidateIndex >= 0 && selectedCandidateIndex < MAX_CANDIDATES;
+
+  useEffect(() => {
+    setVoteError(null);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   const close = () => {
     if (isVoting) return;
@@ -76,13 +120,99 @@ export default function DappPage() {
   };
 
   const vote = async () => {
-    if (!selectedId || hasVoted || isVoting) return;
+    if (!selectedId || alreadyVoted || isVoting) return;
+    setVoteError(null);
+    if (!walletAddress) {
+      setVoteError("Vui lòng kết nối MetaMask trước khi vote.");
+      return;
+    }
+    if (walletHasVoted) {
+      setToast({ kind: "info", message: "Ví này đã vote rồi." });
+      return;
+    }
+
+    const candidateIndex = selectedCandidateIndex;
+    if (candidateIndex < 0) return;
+    if (!isSupportedCandidate) {
+      setVoteError(`Hệ thống hiện chỉ hỗ trợ vote trong khoảng 0..${MAX_CANDIDATES - 1}.`);
+      setToast({ kind: "error", message: `Chỉ hỗ trợ ${MAX_CANDIDATES} lựa chọn (0..${MAX_CANDIDATES - 1}).` });
+      return;
+    }
+
     setIsVoting(true);
     try {
-      await expRef.current?.vote?.(selectedId);
+      const nullifier = addressToNullifierDecimal(walletAddress);
+      if (!nullifier) {
+        setToast({ kind: "error", message: "Địa chỉ ví không hợp lệ." });
+        return;
+      }
+
+      const payload = {
+        candidateId: String(candidateIndex),
+        proofInput: {
+          vote: String(candidateIndex),
+          hasVoted: "0",
+          nullifier,
+        },
+      };
+
+      let res: Response;
+      try {
+        res = await postJsonWithTimeout("/api/vote", payload, 20000);
+      } catch {
+        setToast({ kind: "error", message: "Gửi vote bị timeout. Vui lòng thử lại." });
+        return;
+      }
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed?.error === "NULLIFIER_USED") {
+            setWalletHasVoted(true);
+            setToast({ kind: "error", message: "Bạn đã vote rồi (ví này đã được dùng)." });
+            return;
+          }
+        } catch {
+          // ignore parse errors
+        }
+
+        setVoteError(text || "Gửi vote thất bại.");
+        return;
+      }
+
+      // Mark voted immediately to avoid UI "treo" if animation callbacks don't fire
+      setVotedIds((prev) => new Set(prev).add(selectedId));
+      setWalletHasVoted(true);
+
+      let txHash: string | null = null;
+      try {
+        const data = await res.json();
+        txHash = typeof data?.txHash === "string" ? data.txHash : null;
+      } catch {
+        // ignore non-JSON responses
+      }
+
+      setToast({
+        kind: "success",
+        message: txHash ? `Vote thành công. Tx: ${txHash}` : "Vote thành công.",
+      });
+
+      const anim = expRef.current?.vote?.(selectedId);
+      if (anim) {
+        await Promise.race([anim, new Promise<void>((r) => window.setTimeout(r, 3000))]);
+      }
     } catch {
+      setToast({ kind: "error", message: "Có lỗi khi vote. Vui lòng thử lại." });
+    } finally {
       setIsVoting(false);
     }
+  };
+
+  const onWalletChange = (addr: string | null) => {
+    setWalletAddress(addr);
+    setWalletHasVoted(false);
+    setVoteError(null);
   };
 
   return (
@@ -100,7 +230,7 @@ export default function DappPage() {
           <img src="/dapp-assets/images/logo.png" width={70} height={70} alt="Creative Works Logo" />
         </a>
         <div className="wallet-bar">
-          <MetaMaskConnect />
+          <MetaMaskConnect onAddressChange={onWalletChange} />
         </div>
       </header>
 
@@ -120,6 +250,17 @@ export default function DappPage() {
 
       <footer>2026 zk voting - integrated into Next.js</footer>
 
+      {toast && (
+        <div
+          className={`toast ${
+            toast.kind === "error" ? "toast--error" : toast.kind === "success" ? "toast--success" : "toast--info"
+          }`}
+          role="status"
+        >
+          {toast.message}
+        </div>
+      )}
+
       {selectedVoter && (
         <div className="voter-modal__backdrop" role="presentation" onClick={close}>
           <div className="voter-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -134,10 +275,16 @@ export default function DappPage() {
             </div>
 
             <div className="voter-modal__body">{selectedVoter.bio}</div>
+            {voteError && <div className="voter-modal__error">{voteError}</div>}
+            {walletHasVoted && <div className="voter-modal__error">Ví này đã vote rồi.</div>}
 
             <div className="voter-modal__actions">
-              <button className="voter-modal__btn" onClick={vote} disabled={hasVoted || isVoting}>
-                {hasVoted ? "Đã vote" : isVoting ? "Đang bỏ phiếu..." : "Vote"}
+              <button
+                className="voter-modal__btn"
+                onClick={vote}
+                disabled={alreadyVoted || isVoting || !walletAddress || !isSupportedCandidate}
+              >
+                {!isSupportedCandidate ? "Chưa hỗ trợ" : alreadyVoted ? "Đã vote" : isVoting ? "Đang bỏ phiếu..." : "Vote"}
               </button>
             </div>
           </div>

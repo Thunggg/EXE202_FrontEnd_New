@@ -33,7 +33,11 @@ function chainLabel(chainIdHex: string | null) {
   return map[chainIdHex] ?? chainIdHex;
 }
 
-export default function MetaMaskConnect() {
+export default function MetaMaskConnect({
+  onAddressChange,
+}: {
+  onAddressChange?: (address: string | null) => void;
+}) {
   const [mounted, setMounted] = useState(false);
   const [ethereum, setEthereum] = useState<Eip1193Provider | null>(null);
 
@@ -58,7 +62,9 @@ export default function MetaMaskConnect() {
           ethereum.request({ method: "eth_accounts" }) as Promise<string[]>,
           ethereum.request({ method: "eth_chainId" }) as Promise<string>,
         ]);
-        setAddress(accounts?.[0] ?? null);
+        const nextAddress = accounts?.[0] ?? null;
+        setAddress(nextAddress);
+        onAddressChange?.(nextAddress);
         setChainId(cid ?? null);
       } catch (e: any) {
         setError(e?.message ?? "Không thể đọc trạng thái MetaMask.");
@@ -66,7 +72,9 @@ export default function MetaMaskConnect() {
     };
 
     const onAccountsChanged = (accounts: string[]) => {
-      setAddress(accounts?.[0] ?? null);
+      const nextAddress = accounts?.[0] ?? null;
+      setAddress(nextAddress);
+      onAddressChange?.(nextAddress);
       setError(null);
     };
 
@@ -77,6 +85,7 @@ export default function MetaMaskConnect() {
 
     const onDisconnect = () => {
       setAddress(null);
+      onAddressChange?.(null);
       setError(null);
     };
 
@@ -103,7 +112,9 @@ export default function MetaMaskConnect() {
     setIsConnecting(true);
     try {
       const accounts = (await ethereum.request({ method: "eth_requestAccounts" })) as string[];
-      setAddress(accounts?.[0] ?? null);
+      const nextAddress = accounts?.[0] ?? null;
+      setAddress(nextAddress);
+      onAddressChange?.(nextAddress);
       const cid = (await ethereum.request({ method: "eth_chainId" })) as string;
       setChainId(cid ?? null);
     } catch (e: any) {
@@ -120,6 +131,7 @@ export default function MetaMaskConnect() {
   const disconnect = async () => {
     setError(null);
     setAddress(null);
+    onAddressChange?.(null);
 
     if (!mounted || !ethereum) return;
     try {
