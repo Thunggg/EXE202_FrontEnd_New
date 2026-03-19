@@ -28,6 +28,16 @@ async function postJsonWithTimeout<T>(url: string, body: unknown, timeoutMs: num
   }
 }
 
+async function getJsonWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { method: "GET", signal: ctrl.signal });
+  } finally {
+    window.clearTimeout(t);
+  }
+}
+
 export default function DappPage() {
   const expRef = useRef<{ dispose: () => void; vote: (id: string) => Promise<void> } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -39,6 +49,11 @@ export default function DappPage() {
   const [toast, setToast] = useState<{ message: string; kind: "error" | "info" | "success" } | null>(null);
 
   const MAX_CANDIDATES = 3; // must match circom: var MAX_CANDIDATES = 3;
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsCounts, setStatsCounts] = useState<number[]>(() => Array(MAX_CANDIDATES).fill(0));
+  const [statsAnimate, setStatsAnimate] = useState(false);
 
   const candidates = useMemo(
     () => [
@@ -113,6 +128,48 @@ export default function DappPage() {
     const t = window.setTimeout(() => setToast(null), 3500);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    if (!isStatsOpen) return;
+
+    let cancelled = false;
+    setStatsError(null);
+    setStatsLoading(true);
+    setStatsAnimate(false);
+
+    (async () => {
+      try {
+        const reqs = Array.from({ length: MAX_CANDIDATES }, (_, i) => getJsonWithTimeout(`/api/votes/${i}`, 12000));
+        const responses = await Promise.all(reqs);
+
+        const counts = await Promise.all(
+          responses.map(async (r) => {
+            if (!r.ok) throw new Error(await r.text());
+            const j = await r.json();
+            const c = Number(j?.count ?? 0);
+            return Number.isFinite(c) ? c : 0;
+          })
+        );
+
+        if (cancelled) return;
+        setStatsCounts(counts);
+
+        // trigger bar animation after DOM paints
+        window.setTimeout(() => {
+          if (!cancelled) setStatsAnimate(true);
+        }, 60);
+      } catch (e: any) {
+        if (cancelled) return;
+        setStatsError(e?.message ?? "Không thể tải thống kê.");
+      } finally {
+        if (!cancelled) setStatsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isStatsOpen, MAX_CANDIDATES]);
 
   const close = () => {
     if (isVoting) return;
@@ -215,6 +272,14 @@ export default function DappPage() {
     setVoteError(null);
   };
 
+  const totalVotes = statsCounts.reduce((a, b) => a + b, 0);
+  const statsRows = candidates.slice(0, MAX_CANDIDATES).map((c, i) => {
+    const votes = statsCounts[i] ?? 0;
+    const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
+    const shortLabel = c.name.replace("Ứng viên ", "").trim() || c.name;
+    return { key: c.id, label: shortLabel, votes, pct };
+  });
+
   return (
     <>
       <div className="experience">
@@ -230,6 +295,20 @@ export default function DappPage() {
           <img src="/dapp-assets/images/logo.png" width={70} height={70} alt="Creative Works Logo" />
         </a>
         <div className="wallet-bar">
+          <button
+            type="button"
+            className="stats-btn"
+            aria-label="Mở thống kê bỏ phiếu"
+            title="Thống kê bỏ phiếu"
+            onClick={() => setIsStatsOpen(true)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M4 19h16v2H2V3h2v16Zm4-8h2v6H8v-6Zm4-5h2v11h-2V6Zm4 3h2v8h-2V9Z"
+              />
+            </svg>
+          </button>
           <MetaMaskConnect onAddressChange={onWalletChange} />
         </div>
       </header>
@@ -258,6 +337,47 @@ export default function DappPage() {
           role="status"
         >
           {toast.message}
+        </div>
+      )}
+
+      {isStatsOpen && (
+        <div
+          className="stats-modal__backdrop"
+          role="presentation"
+          onClick={() => setIsStatsOpen(false)}
+        >
+          <div className="stats-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <button className="stats-modal__close" onClick={() => setIsStatsOpen(false)} aria-label="Đóng">
+              ×
+            </button>
+
+            <div className="stats-modal__title">Thống kê bỏ phiếu</div>
+            <div className="stats-modal__subtitle">Tổng số người đã vote: {totalVotes}</div>
+
+            {statsLoading ? (
+              <div className="stats-modal__loading">Đang tải...</div>
+            ) : statsError ? (
+              <div className="stats-modal__error">{statsError}</div>
+            ) : (
+              <div className={`stats-chart ${statsAnimate ? "stats-chart--animate" : ""}`}>
+                <div className="stats-rows">
+                  {statsRows.map((r) => (
+                    <div className="stats-row" key={r.key}>
+                      <div className="stats-row__head">
+                        <div className="stats-row__label">{r.label}:</div>
+                        <div className="stats-row__meta">
+                          {r.votes} votes ({r.pct}%)
+                        </div>
+                      </div>
+                      <div className="stats-row__barTrack" aria-hidden="true">
+                        <div className="stats-row__barFill" style={{ ["--bar-w" as any]: `${r.pct}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
