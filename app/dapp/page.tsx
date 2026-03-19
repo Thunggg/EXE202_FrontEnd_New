@@ -276,8 +276,7 @@ export default function DappPage() {
   const statsRows = candidates.slice(0, MAX_CANDIDATES).map((c, i) => {
     const votes = statsCounts[i] ?? 0;
     const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
-    const shortLabel = c.name.replace("Ứng viên ", "").trim() || c.name;
-    return { key: c.id, label: shortLabel, votes, pct };
+    return { key: c.id, label: c.name, votes, pct };
   });
 
   return (
